@@ -36,3 +36,4 @@ parts:
 
     build-packages:
       - php-all-dev
+      - pkg-config
