@@ -14,10 +14,6 @@ grade: stable
 confinement: strict
 compression: lzo
 
-apps:
-  imagick:
-    command: usr/local/bin/imagick
-
 parts:
   imagick:
     source: https://github.com/Imagick/imagick
