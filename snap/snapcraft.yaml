@@ -1,0 +1,31 @@
+name: imagick
+adopt-info: imagick
+summary: Imagick is a PHP extension to create and modify images
+description: |
+  Imagick is a PHP extension to create and modify images using the ImageMagick library. 
+  There is also a version of Imagick available for HHVM. Although the two extensions are mostly
+  compatible in their API, and they both call the ImageMagick library, the two extensions are
+  completely separate code-bases.
+
+license: PHP-3.01
+
+base: core20
+grade: stable
+confinement: strict
+compression: lzo
+
+apps:
+  imagick:
+    command: usr/local/bin/imagick
+
+parts:
+  imagick:
+    source: https://github.com/Imagick/imagick
+    source-type: git
+    plugin: make
+    make-parameters:
+      - PREFIX=/usr/local
+      
+    override-pull: |
+      snapcraftctl pull
+      snapcraftctl set-version "$(git describe --tags | sed 's/^v//' | cut -d "-" -f1)"
