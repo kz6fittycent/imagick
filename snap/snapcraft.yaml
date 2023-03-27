@@ -25,7 +25,9 @@ parts:
       phpize && ./configure
       make
       make install
-    
+      mkdir -p $SNAPCRAFT_PART_INSTALL
+      cp -r /root/imagick/parts/imagick/build/imagick/modules/* $SNAPCRAFT_PART_INSTALL/imagick/modules/
+
     override-pull: |
       snapcraftctl pull
       snapcraftctl set-version "$(git describe --tags | sed 's/^v//' | cut -d "-" -f1)"
