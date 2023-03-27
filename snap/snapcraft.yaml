@@ -26,7 +26,7 @@ parts:
       make
       make install
       mkdir -p $SNAPCRAFT_PART_INSTALL
-      cp -r /root/imagick/parts/imagick/build/imagick/modules/* $SNAPCRAFT_PART_INSTALL/imagick/modules/
+      cp -r /$SNAPCRAFT_BUILD_PARTS/imagick/modules/* $SNAPCRAFT_PART_INSTALL/imagick/modules/
 
     override-pull: |
       snapcraftctl pull
