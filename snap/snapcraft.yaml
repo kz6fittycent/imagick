@@ -36,4 +36,4 @@ parts:
       - libmagickwand-dev
       
     stage:
-      - modules/
+      - usr/lib/php/*/modules/
