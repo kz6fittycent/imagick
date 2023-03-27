@@ -36,4 +36,4 @@ parts:
       - libmagickwand-dev
       
     stage:
-      - imagick/modules/
+      - modules/
