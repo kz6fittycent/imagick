@@ -25,7 +25,8 @@ parts:
       phpize && ./configure
       make
       make install
-
+      make test
+      
     override-pull: |
       snapcraftctl pull
       snapcraftctl set-version "$(git describe --tags | sed 's/^v//' | cut -d "-" -f1)"
