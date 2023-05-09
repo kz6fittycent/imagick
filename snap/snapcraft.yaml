@@ -18,6 +18,7 @@ parts:
   imagick:
     source: https://github.com/Imagick/imagick
     source-type: git
+    source-branch: 3.7.0
     plugin: nil
     override-build: | 
       git clone https://github.com/Imagick/imagick
