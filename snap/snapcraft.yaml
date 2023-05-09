@@ -25,7 +25,6 @@ parts:
       phpize && ./configure
       make
       make install
-      make test
       
     override-pull: |
       snapcraftctl pull
@@ -38,3 +37,4 @@ parts:
       
     stage:
       - usr/lib/php/*/modules/
+      - usr/include/php/*
