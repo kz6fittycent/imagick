@@ -35,7 +35,10 @@ parts:
       - pkg-config
       - libmagickwand-dev
       - imagemagick
-      
+    
+    stage-packages:
+      - imagemagick
+    
     stage:
       - usr/lib/php/*/modules/
       - usr/include/php/*
