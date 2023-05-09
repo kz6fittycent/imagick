@@ -42,4 +42,4 @@ parts:
     
     stage:
       - usr/lib/php/*/modules/
-      - usr/include/php/
+      - usr/include/php/*/
