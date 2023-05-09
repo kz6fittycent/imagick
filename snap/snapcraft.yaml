@@ -14,6 +14,16 @@ grade: stable
 confinement: strict
 compression: lzo
 
+slots:
+  modules:
+    content: modules
+    read:
+    - $SNAP/usr/lib/php/*/modules/
+  include:
+    content: include
+    read:
+    - $SNAP/usr/include/php/*/
+    
 parts:
   imagick:
     source: https://github.com/Imagick/imagick
