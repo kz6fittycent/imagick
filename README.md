@@ -35,9 +35,11 @@ To turn it back off:
 snap disconnect nextcloud:imagick imagick:php-extensions
 ```
 
-The consuming snap must (re)start its PHP service after a connect for the
-extension to be loaded — the nextcloud fork does this in the
-`connect-plug-imagick` / `disconnect-plug-imagick` hooks.
+Connecting requires a nextcloud snap with the `imagick` plug (proposed
+upstream; not in the published nextcloud snap yet). It restarts php-fpm
+on connect and disconnect, and when this snap refreshes (for example, to
+an ImageMagick security release) its php-fpm notices within a minute and
+reloads gracefully, so the new ImageMagick is actually used.
 
 ## What the nextcloud snap gets
 
