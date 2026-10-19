@@ -1,0 +1,230 @@
+name: 🛡️ Security Rebuild
+
+# Once a day, runs the Snap Store's own security check
+# (review-tools.snap-check-notices - the same check behind the store's
+# "a rebuild would fix this" emails) against the snap published on stable.
+# That covers the Ubuntu packages bundled in it (librsvg, libheif, libtiff,
+# libwebp, ghostscript, ...). ImageMagick, imagick and PHP are built from
+# pinned upstream tarballs, so this check can't see them; track-upstream.yml
+# covers those.
+#
+# When Ubuntu has published fixes for bundled packages, this rebuilds the
+# snap from the exact commit that released that version - never from main,
+# which may hold unreleased work - through snap-builds.yml (same review and
+# smoke test), and releases it straight to stable. It only releases when the
+# rebuild actually clears notices stable still has, so a fix that hasn't
+# reached the archive yet doesn't produce an identical release every day.
+#
+# Run it by hand from the Actions tab (Run workflow):
+# - dry_run: checks and reports, but builds and releases nothing
+# - force: rebuilds and releases even if there are no notices (to test the
+#   pipeline)
+
+on:
+  schedule:
+    - cron: "37 9 * * *"  # daily, 09:37 UTC
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Only check and report - don't build or release"
+        type: boolean
+        default: true
+      force:
+        description: "Rebuild even if there are no security notices"
+        type: boolean
+        default: false
+
+# Store publishing is OFF until the repository variable
+# IMAGICK_STORE_PUBLISH is set to true.
+permissions:
+  contents: read
+
+concurrency:
+  group: security-rebuild
+  cancel-in-progress: false
+
+env:
+  SNAP_NAME: imagick
+
+jobs:
+  check:
+    if: vars.IMAGICK_STORE_PUBLISH == 'true'
+    runs-on: ubuntu-24.04
+    outputs:
+      rebuild: ${{ steps.decide.outputs.rebuild }}
+      version: ${{ steps.stable.outputs.version }}
+      stable_revision: ${{ steps.stable.outputs.revision }}
+      commit: ${{ steps.commit.outputs.commit }}
+    steps:
+      - name: Checkout (full history, to find the release commit)
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Install review-tools
+        run: |
+          # Retried: the Snap Store's CDN has had transient failures.
+          for attempt in 1 2 3; do
+            sudo snap install review-tools && break
+            [[ "$attempt" == 3 ]] && { echo "::error::snap install review-tools failed"; exit 1; }
+            sleep 30
+          done
+
+      - name: Download the stable snap
+        id: stable
+        run: |
+          snap download "$SNAP_NAME" --channel=stable --basename=stable
+          version="$(unsquashfs -cat stable.snap meta/snap.yaml | sed -n 's/^version: *//p' | tr -d "'\"")"
+          revision="$(snap info "$SNAP_NAME" | sed -n 's#^ *latest/stable: *[^ ]* *[^ ]* *(\([0-9]*\)).*#\1#p')"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "revision=$revision" >> "$GITHUB_OUTPUT"
+          echo "Stable: version $version, revision $revision"
+
+      - name: Check for security notices
+        run: |
+          review-tools.snap-check-notices stable.snap | tee notices-raw.json
+          # {"<snap>": {"<revision>": {"<package>": ["USN-...", ...]}}} - empty when none.
+          python3 - <<'EOF'
+          import json
+          raw = json.load(open("notices-raw.json"))
+          notices = next(iter(next(iter(raw.values())).values()), {}) if raw else {}
+          json.dump(notices, open("notices.json", "w"), indent=2, sort_keys=True)
+          print(f"{sum(len(v) for v in notices.values())} notice(s) across {len(notices)} package(s)")
+          EOF
+
+      - name: Find the commit that released this version
+        id: commit
+        env:
+          RELEASED: ${{ steps.stable.outputs.version }}
+        run: |
+          # The newest commit whose snapcraft.yaml sets exactly the released
+          # version (the literal `craftctl set version="..."` line).
+          for c in $(git log --format=%H -- snap/snapcraft.yaml); do
+            if git show "$c:snap/snapcraft.yaml" | grep -qF "craftctl set version=\"${RELEASED}\""; then
+              echo "commit=$c" >> "$GITHUB_OUTPUT"
+              echo "Release commit: $(git log -1 --format='%h %s' "$c")"
+              exit 0
+            fi
+          done
+          echo "::error::No commit set the snap version to ${RELEASED}"
+          exit 1
+
+      - name: Decide
+        id: decide
+        env:
+          FORCE: ${{ inputs.force }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          count="$(python3 -c "import json; print(sum(len(v) for v in json.load(open('notices.json')).values()))")"
+          rebuild=false
+          if [[ "$count" -gt 0 || "$FORCE" == "true" ]]; then
+            rebuild=true
+          else
+            echo "No security notices - nothing to do."
+          fi
+          if [[ "$DRY_RUN" == "true" && "$rebuild" == "true" ]]; then
+            echo "Dry run: would rebuild version ${{ steps.stable.outputs.version }} from ${{ steps.commit.outputs.commit }}."
+            rebuild=false
+          fi
+          echo "rebuild=$rebuild" >> "$GITHUB_OUTPUT"
+
+      - name: Keep the notices for the next job
+        uses: actions/upload-artifact@v7
+        with:
+          name: notices
+          path: notices.json
+
+  build:
+    needs: check
+    if: needs.check.outputs.rebuild == 'true'
+    uses: ./.github/workflows/snap-builds.yml
+    with:
+      ref: ${{ needs.check.outputs.commit }}
+
+  release:
+    needs: [check, build]
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Download the rebuilt snaps
+        uses: actions/download-artifact@v8
+        with:
+          pattern: imagick-snap-*
+          merge-multiple: true
+
+      - name: Download the stable notices
+        uses: actions/download-artifact@v8
+        with:
+          name: notices
+
+      - name: Check the new builds
+        id: verify
+        env:
+          FORCE: ${{ inputs.force }}
+        run: |
+          for attempt in 1 2 3; do
+            sudo snap install review-tools && break
+            [[ "$attempt" == 3 ]] && exit 1
+            sleep 30
+          done
+          # Release only if the rebuild fixes at least one notice stable has
+          # (on every arch), or when forced.
+          release=true
+          for snap in *.snap; do
+            review-tools.snap-check-notices "$snap" > rebuilt-raw.json
+            fixed="$(python3 - <<'EOF'
+          import json
+          stable = json.load(open("notices.json"))
+          raw = json.load(open("rebuilt-raw.json"))
+          rebuilt = next(iter(next(iter(raw.values())).values()), {}) if raw else {}
+          before = {(p, u) for p, us in stable.items() for u in us}
+          after = {(p, u) for p, us in rebuilt.items() for u in us}
+          print(len(before - after))
+          EOF
+          )"
+            echo "$snap fixes $fixed notice(s)"
+            [[ "$fixed" -gt 0 ]] || release=false
+          done
+          if [[ "$release" != "true" && "$FORCE" != "true" ]]; then
+            echo "::warning::The rebuild doesn't fix any notices yet (fix not in the archive?); not releasing."
+          fi
+          [[ "$FORCE" == "true" ]] && release=true
+          echo "release=$release" >> "$GITHUB_OUTPUT"
+
+      - name: Install snapcraft
+        if: steps.verify.outputs.release == 'true'
+        run: sudo snap install snapcraft --classic
+
+      - name: Release to stable
+        if: steps.verify.outputs.release == 'true'
+        env:
+          SNAPCRAFT_STORE_CREDENTIALS: ${{ secrets.SNAPCRAFT_STORE_CREDENTIALS }}
+          VERSION: ${{ needs.check.outputs.version }}
+          STABLE_REVISION: ${{ needs.check.outputs.stable_revision }}
+          COMMIT: ${{ needs.check.outputs.commit }}
+        run: |
+          {
+            echo "## Security rebuild released to stable"
+            echo
+            echo "Version **${VERSION}** (was revision ${STABLE_REVISION}), rebuilt from \`${COMMIT:0:7}\`."
+            echo
+            echo "### Fixed notices"
+            python3 - <<'EOF'
+          import json
+          notices = json.load(open("notices.json"))
+          if not notices:
+              print("_None - started by hand (force)._")
+          for package, usns in sorted(notices.items()):
+              print(f"- `{package}`: " + ", ".join(f"[{u}](https://ubuntu.com/security/notices/{u})" for u in usns))
+          EOF
+            echo
+            echo "| Snap | Revision |"
+            echo "|---|---|"
+          } >> "$GITHUB_STEP_SUMMARY"
+          for snap in *.snap; do
+            # "stable", not "latest/stable" - see publish.yml.
+            output="$(snapcraft upload "$snap" --release=stable)"
+            echo "$output"
+            revision="$(grep -Po 'Revision \K[0-9]+' <<< "$output")"
+            [[ -n "$revision" ]] || { echo "Could not parse a revision from 'snapcraft upload' for $snap"; exit 1; }
+            echo "| ${snap} | ${revision} |" >> "$GITHUB_STEP_SUMMARY"
+          done

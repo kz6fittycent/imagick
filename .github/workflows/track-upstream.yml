@@ -1,0 +1,108 @@
+name: 🔭 Track Upstream
+
+# This snap is locked to the nextcloud snap's PHP: imagick.so must be built
+# against the same PHP (API) nextcloud ships, and on the same base. It also
+# owns ImageMagick's security updates, which the store's notice check
+# (security-rebuild.yml) can't see because ImageMagick is self-built.
+#
+# Once a day, .github/scripts/track_upstream.py compares our pins with:
+# - the PHP tarball and base on nextcloud-snap `master` (what feeds
+#   nextcloud's latest/stable);
+# - the latest ImageMagick and imagick releases.
+#
+# On a change it pushes the bumped pins to the `track-upstream` branch, opens
+# (or updates) a PR to main, and starts Snap Builds on it - pushes and PRs
+# made with the workflow token don't start workflows by themselves, but a
+# workflow_dispatch does. Merging the PR releases it: Snap Builds runs on
+# main, and publish.yml releases the tested snaps to stable.
+#
+# A base change, or nextcloud-snap `develop` running ahead of `master` on PHP
+# minor version or base, becomes an issue (label: upstream) instead, since
+# the build and nextcloud have to switch together.
+#
+# Needs: Settings -> Actions -> General -> "Allow GitHub Actions to create
+# and approve pull requests", and issues enabled on the repository.
+
+on:
+  schedule:
+    - cron: "7 8 * * *"  # daily, 08:07 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+  actions: write
+
+concurrency:
+  group: track-upstream
+  cancel-in-progress: false
+
+env:
+  BRANCH: track-upstream
+
+jobs:
+  track:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v7
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Compare pins with upstream
+        id: track
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 -I .github/scripts/track_upstream.py
+
+      - name: Raise issues that need a person
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          count="$(jq length issues.json)"
+          [[ "$count" -gt 0 ]] || { echo "Nothing to raise."; exit 0; }
+          gh label create "upstream" --repo "$GITHUB_REPOSITORY" --color "1D76DB" \
+            --description "Upstream (nextcloud snap, ImageMagick, imagick) moved" 2>/dev/null || true
+          for i in $(seq 0 $((count - 1))); do
+            title="$(jq -r ".[$i].title" issues.json)"
+            existing="$(gh issue list --repo "$GITHUB_REPOSITORY" --label upstream --state open \
+              --search "in:title \"$title\"" --json number,title --jq ".[] | select(.title == \"$title\") | .number")"
+            if [[ -n "$existing" ]]; then
+              echo "Already open: #$existing $title"
+              continue
+            fi
+            jq -r ".[$i].body" issues.json > issue-body.md
+            gh issue create --repo "$GITHUB_REPOSITORY" --label upstream --title "$title" --body-file issue-body.md
+          done
+
+      - name: Push the bump and open or update the PR
+        if: steps.track.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TITLE: ${{ steps.track.outputs.title }}
+        run: |
+          # Only snap/ and README.md are ever changed; if the branch already
+          # has exactly this, there's nothing new (don't rebuild the same
+          # bump daily).
+          if git fetch origin "$BRANCH" 2>/dev/null && git diff --quiet "origin/$BRANCH" -- snap/ README.md; then
+            echo "origin/$BRANCH already has these pins."
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git checkout -B "$BRANCH"
+          git commit -am "$TITLE"
+          git push --force origin "$BRANCH"
+
+          pr="$(gh pr list --repo "$GITHUB_REPOSITORY" --head "$BRANCH" --state open --json number --jq '.[0].number // empty')"
+          if [[ -n "$pr" ]]; then
+            gh pr edit "$pr" --repo "$GITHUB_REPOSITORY" --title "$TITLE" --body-file pr-body.md
+          else
+            gh pr create --repo "$GITHUB_REPOSITORY" --base main --head "$BRANCH" \
+              --title "$TITLE" --body-file pr-body.md
+          fi
+
+          gh workflow run snap-builds.yml --repo "$GITHUB_REPOSITORY" --ref "$BRANCH"

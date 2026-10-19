@@ -1,0 +1,74 @@
+name: 📦 Publish
+
+# Chained off "🧪 Snap Builds" via workflow_run, so this only fires once
+# that workflow has passed on main: built, reviewed, and smoke-tested
+# against the nextcloud snap on latest/stable. It then releases the snaps
+# that run built (its artifacts, not a fresh build) straight to stable.
+# This snap is locked to nextcloud's stable PHP, so there is no separate
+# candidate/testing step: the smoke test is the gate, and so is merging a
+# track-upstream PR.
+on:
+  workflow_run:
+    workflows: ["🧪 Snap Builds"]
+    types: [completed]
+    branches: [main]
+
+# Store publishing is OFF until the repository variable
+# IMAGICK_STORE_PUBLISH is set to true.
+permissions:
+  contents: read
+
+concurrency:
+  group: publish
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    # event == 'push' and the repository check matter: a PR from a fork
+    # whose branch happens to be called "main" also has head_branch ==
+    # 'main', and its artifacts must never reach the store.
+    if: >
+      vars.IMAGICK_STORE_PUBLISH == 'true' &&
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_branch == 'main' &&
+      github.event.workflow_run.head_repository.full_name == github.repository
+    runs-on: ubuntu-24.04
+    permissions:
+      actions: read
+    steps:
+      - name: Download the tested snaps
+        uses: actions/download-artifact@v8
+        with:
+          pattern: imagick-snap-*
+          merge-multiple: true
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ github.token }}
+
+      - name: Install snapcraft
+        run: sudo snap install snapcraft --classic
+
+      - name: Release to stable
+        env:
+          SNAPCRAFT_STORE_CREDENTIALS: ${{ secrets.SNAPCRAFT_STORE_CREDENTIALS }}
+          RUN_URL: ${{ github.event.workflow_run.html_url }}
+        run: |
+          {
+            echo "## Released to stable"
+            echo
+            echo "From [Snap Builds](${RUN_URL})."
+            echo
+            echo "| Snap | Revision |"
+            echo "|---|---|"
+          } >> "$GITHUB_STEP_SUMMARY"
+          for snap in *.snap; do
+            # Not "latest/stable": a `snapcraft export-login` macaroon's
+            # channel grant is the bare risk levels (stable/candidate/beta/
+            # edge), so the store rejects the track-prefixed form with
+            # invalid-channel-permission.
+            output="$(snapcraft upload "$snap" --release=stable)"
+            echo "$output"
+            revision="$(grep -Po 'Revision \K[0-9]+' <<< "$output")"
+            [[ -n "$revision" ]] || { echo "Could not parse a revision from 'snapcraft upload' for $snap"; exit 1; }
+            echo "| ${snap} | ${revision} |" >> "$GITHUB_STEP_SUMMARY"
+          done

@@ -1,0 +1,7 @@
+# snapcraft build output
+*.snap
+/parts/
+/stage/
+/prime/
+/.craft/
+/squashfs-root/

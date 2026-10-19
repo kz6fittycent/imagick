@@ -1,0 +1,86 @@
+name: 🧪 Snap Builds
+
+# Builds the snap for amd64 and arm64, runs the store's review-tools on it,
+# and smoke-tests it against the nextcloud snap as published on
+# latest/stable (.github/tests/smoke-test.sh). Nothing goes to the store
+# here; publish.yml releases the snaps this produced once a run on
+# main passes.
+#
+# Also run:
+# - by track-upstream.yml (workflow_dispatch) on the branches it opens PRs
+#   from, since pushes and PRs made with the workflow token don't start
+#   workflows by themselves;
+# - by security-rebuild.yml (workflow_call) on the commit that released the
+#   current stable version.
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+  workflow_call:
+    inputs:
+      ref:
+        description: "Commit to build"
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build and test (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+
+      - uses: canonical/setup-lxd@v1
+
+      - name: Build Snap
+        id: build
+        run: |
+          sudo snap install snapcraft --classic
+          snapcraft pack
+          echo "snap=$(ls -- *.snap)" >> "$GITHUB_OUTPUT"
+
+      # Download it from the run's Summary page (zipped). publish.yml
+      # and security-rebuild.yml upload exactly these files to the store, so
+      # what gets published is what was tested.
+      - name: Upload Snap
+        uses: actions/upload-artifact@v7
+        with:
+          name: imagick-snap-${{ matrix.arch }}
+          path: ${{ steps.build.outputs.snap }}
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Snapcraft Review
+        uses: diddlesnaps/snapcraft-review-action@v1
+        with:
+          snap: ${{ steps.build.outputs.snap }}
+          isClassic: 'false'
+
+      - name: Smoke test against nextcloud latest/stable
+        env:
+          SNAP_FILE: ${{ steps.build.outputs.snap }}
+        run: |
+          # core22 = jammy, so test in a jammy container.
+          lxc launch ubuntu:22.04 smoke -c security.nesting=true
+          lxc exec smoke -- cloud-init status --wait >/dev/null
+          lxc file push "$SNAP_FILE" smoke/root/imagick.snap
+          lxc file push .github/tests/smoke-test.sh .github/tests/smoke.php smoke/root/
+          lxc exec smoke -- bash /root/smoke-test.sh /root/imagick.snap /root/smoke.php

@@ -1,0 +1,313 @@
+# Content-provider snap: ships a PHP imagick.so plus a full-featured
+# ImageMagick 7 and friends behind a `content` slot. The intended consumer
+# is the nextcloud snap (https://github.com/nextcloud-snap/nextcloud-snap);
+# its admin opts in with:
+#
+#   snap connect nextcloud:imagick imagick:php-extensions
+#
+# ABI note: the extension is built against PHP 8.4.26 headers (PHP API
+# 20240924, non-ZTS) — byte-for-byte the same source tarball and checksum
+# the nextcloud snap builds its PHP from (both `master` and `develop`).
+# The PHP built here is a build-time tool only (phpize/php-config/headers)
+# and is NOT primed into the snap.
+#
+# ImageMagick is full-featured (SVG/librsvg, HEIC/libheif, TIFF, PDF/PS via
+# ghostscript, fonts, webp, png, jpeg, lcms2, xml) with ImageMagick's stock
+# policy. Connecting the content plug IS the opt-in: the admin accepts the
+# risk and can remove it any time by disconnecting the plug or removing
+# this snap.
+
+name: imagick
+adopt-info: imagick
+summary: PHP imagick extension + ImageMagick 7 as a content snap (e.g. for Nextcloud)
+description: |
+  Imagick is a PHP extension to create and modify images using the
+  ImageMagick library.
+
+  This snap is a content provider. It ships:
+    - imagick.so, built against PHP 8.4.26 (PHP API 20240924, non-ZTS),
+      the exact PHP source the nextcloud snap uses;
+    - a self-built, full-featured ImageMagick 7.1.2-34 (Q16HDRI) with
+      librsvg (SVG), libheif (HEIC/HEIF), libtiff, libwebp, libjpeg,
+      libpng, lcms2, freetype/fontconfig and ghostscript (PDF/PS/AI);
+    - ImageMagick's stock policy.xml.
+
+  The nextcloud snap consumes this through a manual content connection:
+
+    snap connect nextcloud:imagick imagick:php-extensions
+
+  which clears the admin warning "The PHP module imagick is not enabled
+  although the theming app is". Nothing changes in the consuming snap until
+  the plug is connected; disconnecting or removing this snap removes the
+  exposure again (it does not undo a compromise that already happened).
+
+  The consuming snap's own PHP loads the extension; this snap never runs
+  PHP itself.
+
+license: PHP-3.01
+website: https://github.com/kz6fittycent/imagick
+source-code: https://github.com/kz6fittycent/imagick
+issues: https://github.com/kz6fittycent/imagick/issues
+
+base: core22
+grade: stable
+confinement: strict
+
+slots:
+  php-extensions:
+    interface: content
+    content: php-extensions
+    read:
+      - $SNAP/extensions
+
+parts:
+  # PHP 8.4.26, built only to provide phpize/php-config/headers for the
+  # imagick part. Must stay the exact same tarball (and so the same PHP API
+  # number) as the nextcloud snap's php part. Nothing is primed.
+  php-dev:
+    plugin: autotools
+    source: https://www.php.net/distributions/php-8.4.26.tar.bz2
+    source-checksum: sha256/4209694d7b0f63c45a3773e07cdc2bbfc71249265a5d951b1ff53e1147edc5ca
+    source-type: tar
+    autotools-configure-parameters:
+      - --prefix=$CRAFT_PART_INSTALL
+      - --disable-all
+      - --disable-cgi
+      - --disable-phpdbg
+      - --disable-rpath
+    build-packages:
+      - pkg-config
+      - libxml2-dev
+    stage:
+      - bin/phpize
+      - bin/php-config
+      - include/php
+      - lib/php/build
+    prime:
+      - -*
+
+  # Full-featured ImageMagick 7, Q16HDRI, coders statically linked
+  # (--without-modules) so the content tree is relocatable; runtime config is
+  # found via MAGICK_CONFIGURE_PATH set by the consumer wrapper. The release
+  # tag ships a generated `configure` (no top-level CMakeLists.txt), so use
+  # the autotools plugin.
+  imagemagick:
+    plugin: autotools
+    source: https://github.com/ImageMagick/ImageMagick/archive/refs/tags/7.1.2-34.tar.gz
+    source-checksum: sha256/f5163a573a1c1bff16358d0a592b2fb168ad0fd3b9dc5ff57dc7820eebc5cf79
+    source-type: tar
+    autotools-configure-parameters:
+      - --prefix=/usr
+      - --libdir=/usr/lib
+      - --with-quantum-depth=16
+      - --enable-hdri
+      - --disable-static
+      - --without-modules
+      - --with-fontconfig=yes
+      - --with-freetype=yes
+      - --with-lcms=yes
+      - --with-rsvg=yes
+      - --with-jpeg=yes
+      - --with-png=yes
+      - --with-tiff=yes
+      - --with-webp=yes
+      - --with-heic=yes
+      - --with-raqm=yes
+      - --with-xml=yes
+      - --without-x
+      - --without-perl
+      - --without-openexr
+      - --without-lqr
+      - --without-djvu
+      - --without-fftw
+      - --without-flif
+      - --without-gvc
+      - --without-jbig
+      - --without-jxl
+      - --without-pango
+      - --without-wmf
+      - --without-gslib
+      # OpenMP threads don't mix with php-fpm's forked workers (imagick's
+      # own docs warn about hangs/crashes); keep ImageMagick single-threaded.
+      - --disable-openmp
+    override-build: |
+      craftctl default
+      # jammy's ghostscript 9.55 has no png16malpha device (added in GS 10);
+      # ImageMagick 7.1.x requests it for the ps:alpha/pcl/xps delegates, so
+      # PDF/PS rasterisation fails with "Unknown device". pngalpha is the
+      # 9.x equivalent. Patch the staged delegates.xml before organize moves
+      # usr/ under extensions/.
+      sed -i 's/png16malpha/pngalpha/g' \
+        "$CRAFT_PART_INSTALL/usr/etc/ImageMagick-7/delegates.xml"
+
+      # A second, complete config dir with ImageMagick's own "limited"
+      # policy (resource limits; no reads of MSL/MVG/PDF/PS/SVG/TXT/URL/XPS,
+      # @files, pipes or /etc). Not used by default: a consumer can point
+      # MAGICK_CONFIGURE_PATH at it to tighten things without a rebuild.
+      # It is a full copy because ImageMagick merges every policy.xml on
+      # the search path.
+      cfg="$CRAFT_PART_INSTALL/usr/etc/ImageMagick-7"
+      cp -a "$cfg" "$cfg-limited"
+      cp "$CRAFT_PART_SRC/config/policy-limited.xml" "$cfg-limited/policy.xml"
+
+      # ImageMagick's libtool archives record /usr/lib paths and make
+      # libtool fail when the imagick part links against the staged libs.
+      # They are not shipped anyway.
+      rm -f "$CRAFT_PART_INSTALL"/usr/lib/*.la
+    build-packages:
+      - pkg-config
+      - libpng-dev
+      - libjpeg-turbo8-dev
+      - libtiff5-dev
+      - libwebp-dev
+      - libheif-dev
+      - librsvg2-dev
+      - liblcms2-dev
+      - libfontconfig1-dev
+      - libfreetype6-dev
+      - libxml2-dev
+      - libraqm-dev
+    stage-packages:
+      - librsvg2-2
+      - libheif1
+      - liblcms2-2
+      - libwebp7
+      - libwebpmux3
+      - libwebpdemux2
+      - libtiff5
+      - libraqm0
+      - libfontconfig1
+      - libfreetype6
+      - libxml2
+    organize:
+      '*': extensions/
+    prime:
+      - extensions/usr/lib
+      - extensions/usr/etc
+      - extensions/usr/share
+      - -extensions/usr/include
+      - -extensions/usr/bin
+      - -extensions/usr/lib/pkgconfig
+      - -extensions/usr/lib/**/*.la
+      - -extensions/usr/lib/**/*.a
+      - -extensions/usr/share/apport
+      - -extensions/usr/share/bash-completion
+      - -extensions/usr/share/debconf
+      - -extensions/usr/share/doc
+      - -extensions/usr/share/doc-base
+      - -extensions/usr/share/gettext
+      - -extensions/usr/share/info
+      - -extensions/usr/share/lintian
+      - -extensions/usr/share/man
+      - -extensions/usr/share/metainfo
+      - -extensions/usr/share/perl5
+      - -extensions/usr/share/pixmaps
+      - -extensions/usr/share/pkgconfig
+
+  # Ghostscript for the PDF/PostScript/Illustrator delegates: just the `gs`
+  # binary, its libraries and its data (Resource tree, fonts, CMaps, ICC
+  # profiles). The consumer wrapper appends extensions/usr/bin to PATH and
+  # points GS_LIB at the staged resources.
+  ghostscript:
+    plugin: nil
+    stage-packages:
+      - ghostscript
+    organize:
+      '*': extensions/
+    prime:
+      - extensions/usr/bin/gs
+      - extensions/usr/lib
+      - extensions/usr/share
+      - extensions/etc/ghostscript
+      - -extensions/usr/lib/**/*.la
+      - -extensions/usr/lib/**/*.a
+      - -extensions/usr/share/apport
+      - -extensions/usr/share/bash-completion
+      - -extensions/usr/share/debconf
+      - -extensions/usr/share/doc
+      - -extensions/usr/share/doc-base
+      - -extensions/usr/share/gettext
+      - -extensions/usr/share/info
+      - -extensions/usr/share/lintian
+      - -extensions/usr/share/man
+      - -extensions/usr/share/metainfo
+      - -extensions/usr/share/perl5
+      - -extensions/usr/share/pixmaps
+      - -extensions/usr/share/pkgconfig
+
+  # The imagick extension itself, built against php-dev's headers and
+  # imagemagick's libs, dropped into the content tree at the same relative
+  # extension path the nextcloud snap uses.
+  imagick:
+    plugin: nil
+    source: https://github.com/Imagick/imagick/archive/refs/tags/3.8.1.tar.gz
+    source-checksum: sha256/b0e9279ddf6e75a8c6b4068e16daec0475427dbca7ce2e144e30a51a88aa5ddc
+    source-type: tar
+    after:
+      - php-dev
+      - imagemagick
+      - ghostscript
+    build-packages:
+      - pkg-config
+    override-build: |
+      export PATH="$CRAFT_STAGE/bin:$PATH"
+
+      # imagick's imagemagick.m4 finds MagickWand via pkg-config, then
+      # *clobbers* PKG_CONFIG_PATH (to a bare /usr/lib/pkgconfig) before it
+      # reads --modversion/--cflags/--libs/--variable. PKG_CONFIG_LIBDIR is
+      # not touched by that, so give it a private copy of the staged .pc
+      # files whose prefix is already the staged absolute path. That keeps
+      # both the header probe and the compile flags pointed at the content
+      # tree without relying on PKG_CONFIG_SYSROOT_DIR (which mangles
+      # --variable prefix here).
+      pcdir="$CRAFT_PART_BUILD/pc"
+      mkdir -p "$pcdir"
+      for f in "$CRAFT_STAGE"/extensions/usr/lib/pkgconfig/*.pc; do
+        sed -e "s|^prefix=.*|prefix=$CRAFT_STAGE/extensions/usr|" \
+            -e "s|^libdir=.*|libdir=$CRAFT_STAGE/extensions/usr/lib|" \
+            "$f" > "$pcdir/$(basename "$f")"
+      done
+      export PKG_CONFIG_PATH="$pcdir"
+      export PKG_CONFIG_LIBDIR="$pcdir"
+      unset PKG_CONFIG_SYSROOT_DIR
+      # pkgconf filters -L/usr/lib out as a system dir, so add the staged
+      # ImageMagick lib dir to the link line explicitly.
+      export LDFLAGS="$LDFLAGS -L$CRAFT_STAGE/extensions/usr/lib"
+
+      # The tag archive keeps the @PACKAGE_VERSION@ placeholder that imagick's
+      # PECL release process fills in (phpversion('imagick') would report
+      # it literally); fill it in from package.xml.
+      ext_version="$(sed -n 's:^[[:space:]]*<release>\([0-9][^<]*\)</release>.*:\1:p' package.xml | head -1)"
+      [ -n "$ext_version" ]
+      sed -i "s/@PACKAGE_VERSION@/$ext_version/" php_imagick.h
+
+      phpize
+      # imagick links libgomp whenever <omp.h> compiles, only to call
+      # omp_pause_resource_all() at shutdown. ImageMagick is built without
+      # OpenMP, so skip that (and don't depend on libgomp at all).
+      export ac_cv_func_omp_pause_resource_all=no
+      ./configure \
+        --prefix="$CRAFT_PART_INSTALL" \
+        --with-php-config="$CRAFT_STAGE/bin/php-config"
+
+      make -j"$(nproc)"
+
+      echo "=== ldd imagick.so ==="
+      ldd modules/imagick.so | sort
+      echo "=== END ldd ==="
+
+      # Don't let `make install` write into the php-dev part's tree; place
+      # the module in the content layout by hand instead, under the same
+      # directory name PHP itself uses (no-debug-non-zts-<PHP API>), so a
+      # consumer can find the build that matches its own PHP.
+      api_dir="$(basename "$(php-config --extension-dir)")"
+      dest="$CRAFT_PART_INSTALL/extensions/php/extensions/$api_dir"
+      mkdir -p "$dest"
+      cp modules/imagick.so "$dest/"
+
+      # <imagick>+im<ImageMagick>+php<PHP it was built against>. Kept as a
+      # literal: .github/scripts/track_upstream.py rewrites it on a bump,
+      # and security-rebuild.yml looks for it to find the release commit.
+      craftctl set version="3.8.1+im7.1.2-34+php8.4.26"
+    prime:
+      - extensions/php
