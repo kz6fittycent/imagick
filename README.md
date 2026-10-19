@@ -1,16 +1,25 @@
-# imagick snap (content provider)
+# imagick content snap for the nextcloud snap
 
-A `content` snap that ships a PHP **imagick** extension together with a
-full-featured **ImageMagick 7** and the things nextcloud-style image
-handling needs (librsvg for SVG, libheif for HEIC/HEIF, libtiff, webp,
-jpeg, png, lcms2, freetype/fontconfig, ghostscript for PDF/PS/AI).
+> [!IMPORTANT]
+> **This snap exists only to provide the PHP `imagick` extension to the
+> [nextcloud snap](https://github.com/nextcloud-snap/nextcloud-snap).** It
+> is not a general-purpose PHP extension or ImageMagick snap. It is built
+> for exactly the PHP the nextcloud snap ships (same version, PHP API and
+> base), has no apps or commands of its own, and does nothing by itself.
+>
+> Other snaps or setups might happen to work with it, but they are **not
+> supported**: please don't open issues for them. Issues with Nextcloud
+> itself belong with [nextcloud-snap](https://github.com/nextcloud-snap/nextcloud-snap/issues)
+> or [Nextcloud](https://github.com/nextcloud/server/issues).
 
-The main consumer is the
-[nextcloud snap](https://github.com/nextcloud-snap/nextcloud-snap): the
-admin connects the plug and the warning *"The PHP module imagick is not
-enabled although the theming app is"* goes away.
+It ships `imagick.so` together with a full-featured **ImageMagick 7** and
+what Nextcloud's image handling needs: librsvg for SVG, libheif for
+HEIC/HEIF, libtiff, webp, jpeg, png, lcms2, freetype/fontconfig, and
+ghostscript for PDF/PS/AI. The admin connects the plug, and the warning
+*"The PHP module imagick is not enabled although the theming app is"*
+goes away.
 
-This snap never runs PHP itself. It only hands files to the consumer
+This snap never runs PHP itself. It only hands files to the nextcloud snap
 through a [content interface](https://snapcraft.io/docs/content-interface).
 
 ## Install and enable
@@ -30,10 +39,10 @@ The consuming snap must (re)start its PHP service after a connect for the
 extension to be loaded — the nextcloud fork does this in the
 `connect-plug-imagick` / `disconnect-plug-imagick` hooks.
 
-## What the consumer gets
+## What the nextcloud snap gets
 
-Everything is mounted under the consumer's plug target (nextcloud:
-`$SNAP/extensions`):
+Everything is mounted under the nextcloud snap's plug target,
+`$SNAP/extensions`:
 
 ```
 extensions/php/extensions/no-debug-non-zts-20240924/imagick.so
@@ -45,11 +54,11 @@ extensions/usr/bin/gs                     ghostscript
 extensions/usr/share/ghostscript/...      gs Resource tree
 ```
 
-The consumer is responsible for pointing its PHP at the extension and
-giving ImageMagick/ghostscript their paths, roughly:
+The nextcloud snap's PHP wrappers point PHP at the extension and give
+ImageMagick/ghostscript their paths, roughly:
 
 ```sh
-# Append, don't prepend: the consumer's own copies of shared libraries
+# Append, don't prepend: nextcloud's own copies of shared libraries
 # (libxml2, ICU, freetype, ...) should keep winning.
 LD_LIBRARY_PATH="$LD_LIBRARY_PATH:$SNAP/extensions/usr/lib:$SNAP/extensions/usr/lib/<arch-triplet>"
 PATH="$PATH:$SNAP/extensions/usr/bin"
@@ -66,37 +75,38 @@ connected.)
 
 `imagick.so` is built against **PHP 8.4.26** headers — PHP API
 **20240924**, **non-ZTS**. It uses the exact same PHP source tarball (and
-checksum) the nextcloud snap builds its PHP from. A consumer on a
-different PHP API will not load it; content snaps are matched to a
-specific consumer like this on purpose.
+checksum) the nextcloud snap builds its PHP from. PHP on any other API
+will not load it; that's deliberate, since this snap is matched to the
+nextcloud snap and nothing else.
 
 Versions in this build: **imagick 3.8.1**, **ImageMagick 7.1.2-34**
 (Q16-HDRI), **ghostscript 9.55.0** (from core22/jammy). The snap version
 spells out all three pins: `3.8.1+im7.1.2-34+php8.4.26`.
 
-The libraries are built on **core22**, so the consumer must be on core22
-too. For the nextcloud snap that means **track 34 and later**: the `33`
+The libraries are built on **core22**, so the nextcloud snap must be on
+core22 too. That means nextcloud **track 34 and later**: the `33`
 track also runs PHP 8.4, but on core20, so `imagick.so` would fail to load
 there (PHP prints a warning and carries on without it).
 
 The extension sits in a directory named after the PHP API it was built
 for (`no-debug-non-zts-<API>`, the same name PHP uses for its own
-extension dir), so a consumer can look up the build matching *its* PHP
-and simply skip loading when there is none.
+extension dir), so the nextcloud snap can look up the build matching
+*its* PHP and simply skip loading when there is none.
 
 ## Security
 
 This is a manual opt-in. ImageMagick parses many complex, untrusted
-image formats and has a long CVE history. `imagick.so` runs inside the
-consumer's PHP with the consumer's privileges, so this snap's own
+image formats and has a long CVE history. `imagick.so` runs inside
+Nextcloud's PHP with the nextcloud snap's privileges, so this snap's own
 confinement does not isolate it. Connecting the plug is a deliberate risk
-decision by the consumer's admin:
+decision by the Nextcloud admin:
 
 - ImageMagick ships its **stock** `policy.xml` by default.
 - A stricter config dir, `usr/etc/ImageMagick-7-limited`, carries
   ImageMagick's own "limited" policy (resource limits; no reading of
   MSL/MVG/PDF/PS/SVG/TXT/URL/XPS, `@file`s, pipes or `/etc`). Nothing uses
-  it by default; a consumer can point `MAGICK_CONFIGURE_PATH` at it. Note
+  it by default; the nextcloud snap could point `MAGICK_CONFIGURE_PATH`
+  at it. Note
   that it also blocks SVG, so Nextcloud's theming favicons stop working.
 - ImageMagick is built **without OpenMP**, which does not mix well with
   php-fpm's forked workers.
@@ -137,14 +147,13 @@ straight to **stable** once the smoke test against that nextcloud passes.
 - **Track Upstream** (`track-upstream.yml`): daily, compares our pins
   with the PHP the nextcloud snap builds on `master` (what feeds
   `latest/stable`), its base, and the latest ImageMagick and imagick
-  releases. On a change, it opens a PR with the new pins and checksums
-  and starts Snap Builds on it; **merging it releases to stable**. A PHP
-  *minor* bump (new API) fails the smoke test on purpose until nextcloud's
-  stable ships the same PHP, so it can't be released early. A base change,
-  or a `develop` branch that has moved ahead of `master`, is flagged in an
-  issue, because those need a person (the build and the consumer must move
-  together). ImageMagick is self-built, so the store's notice check doesn't
-  cover it; this tracker is what picks up its security releases.
+  releases. ImageMagick and imagick releases, and PHP patch releases,
+  are committed straight to `main` with new checksums; Snap Builds runs
+  on that, and a green run releases to stable. A PHP *minor* bump (new
+  PHP API), a base change, or nextcloud-snap's `develop` moving ahead of
+  `master` becomes an issue instead, because this snap and nextcloud must
+  switch together. ImageMagick is self-built, so the store's notice check
+  doesn't cover it; this tracker is what picks up its security releases.
 
 `snap/snapcraft.yaml` builds ImageMagick, ghostscript's runtime and the
 `imagick` extension from pinned upstream tarballs (PHP is a build-time

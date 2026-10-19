@@ -10,18 +10,16 @@ name: 🔭 Track Upstream
 #   nextcloud's latest/stable);
 # - the latest ImageMagick and imagick releases.
 #
-# On a change it pushes the bumped pins to the `track-upstream` branch, opens
-# (or updates) a PR to main, and starts Snap Builds on it - pushes and PRs
-# made with the workflow token don't start workflows by themselves, but a
-# workflow_dispatch does. Merging the PR releases it: Snap Builds runs on
-# main, and publish.yml releases the tested snaps to stable.
+# On a change it commits the bumped pins straight to main and starts Snap
+# Builds there - pushes made with the workflow token don't start workflows
+# by themselves, but a workflow_dispatch does. When that passes (build,
+# review, smoke test against nextcloud latest/stable), publish.yml releases
+# it to stable. A failing build releases nothing and leaves main red, and
+# GitHub emails you about the failed run.
 #
-# A base change, or nextcloud-snap `develop` running ahead of `master` on PHP
-# minor version or base, becomes an issue (label: upstream) instead, since
-# the build and nextcloud have to switch together.
-#
-# Needs: Settings -> Actions -> General -> "Allow GitHub Actions to create
-# and approve pull requests", and issues enabled on the repository.
+# A PHP minor (API) change, a base change, or nextcloud-snap `develop`
+# running ahead of `master` on either becomes an issue (label: upstream)
+# instead, since this snap and nextcloud have to switch together.
 
 on:
   schedule:
@@ -30,16 +28,12 @@ on:
 
 permissions:
   contents: write
-  pull-requests: write
   issues: write
   actions: write
 
 concurrency:
   group: track-upstream
   cancel-in-progress: false
-
-env:
-  BRANCH: track-upstream
 
 jobs:
   track:
@@ -77,32 +71,18 @@ jobs:
             gh issue create --repo "$GITHUB_REPOSITORY" --label upstream --title "$title" --body-file issue-body.md
           done
 
-      - name: Push the bump and open or update the PR
+      - name: Commit the bump to main and build it
         if: steps.track.outputs.changed == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           TITLE: ${{ steps.track.outputs.title }}
         run: |
-          # Only snap/ and README.md are ever changed; if the branch already
-          # has exactly this, there's nothing new (don't rebuild the same
-          # bump daily).
-          if git fetch origin "$BRANCH" 2>/dev/null && git diff --quiet "origin/$BRANCH" -- snap/ README.md; then
-            echo "origin/$BRANCH already has these pins."
-            exit 0
-          fi
-
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git checkout -B "$BRANCH"
-          git commit -am "$TITLE"
-          git push --force origin "$BRANCH"
+          git commit -a -F - <<EOF
+          ${TITLE}
 
-          pr="$(gh pr list --repo "$GITHUB_REPOSITORY" --head "$BRANCH" --state open --json number --jq '.[0].number // empty')"
-          if [[ -n "$pr" ]]; then
-            gh pr edit "$pr" --repo "$GITHUB_REPOSITORY" --title "$TITLE" --body-file pr-body.md
-          else
-            gh pr create --repo "$GITHUB_REPOSITORY" --base main --head "$BRANCH" \
-              --title "$TITLE" --body-file pr-body.md
-          fi
-
-          gh workflow run snap-builds.yml --repo "$GITHUB_REPOSITORY" --ref "$BRANCH"
+          $(cat commit-body.txt)
+          EOF
+          git push origin HEAD:main
+          gh workflow run snap-builds.yml --repo "$GITHUB_REPOSITORY" --ref main

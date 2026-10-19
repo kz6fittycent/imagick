@@ -5,8 +5,7 @@ name: 📦 Publish
 # against the nextcloud snap on latest/stable. It then releases the snaps
 # that run built (its artifacts, not a fresh build) straight to stable.
 # This snap is locked to nextcloud's stable PHP, so there is no separate
-# candidate/testing step: the smoke test is the gate, and so is merging a
-# track-upstream PR.
+# candidate/testing step: the smoke test is the gate.
 on:
   workflow_run:
     workflows: ["🧪 Snap Builds"]
@@ -24,13 +23,15 @@ concurrency:
 
 jobs:
   publish:
-    # event == 'push' and the repository check matter: a PR from a fork
-    # whose branch happens to be called "main" also has head_branch ==
-    # 'main', and its artifacts must never reach the store.
+    # The event and repository checks matter: a PR from a fork whose branch
+    # happens to be called "main" also has head_branch == 'main', and its
+    # artifacts must never reach the store. workflow_dispatch is how
+    # track-upstream.yml builds the pin bumps it commits to main (only
+    # people and workflows with write access can dispatch).
     if: >
       vars.IMAGICK_STORE_PUBLISH == 'true' &&
       github.event.workflow_run.conclusion == 'success' &&
-      github.event.workflow_run.event == 'push' &&
+      contains(fromJSON('["push", "workflow_dispatch"]'), github.event.workflow_run.event) &&
       github.event.workflow_run.head_branch == 'main' &&
       github.event.workflow_run.head_repository.full_name == github.repository
     runs-on: ubuntu-24.04

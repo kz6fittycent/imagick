@@ -1,7 +1,9 @@
-# Content-provider snap: ships a PHP imagick.so plus a full-featured
-# ImageMagick 7 and friends behind a `content` slot. The intended consumer
-# is the nextcloud snap (https://github.com/nextcloud-snap/nextcloud-snap);
-# its admin opts in with:
+# Content snap for the nextcloud snap ONLY
+# (https://github.com/nextcloud-snap/nextcloud-snap): ships a PHP imagick.so
+# plus a full-featured ImageMagick 7 and friends behind a `content` slot,
+# built for exactly the PHP the nextcloud snap ships. It is not a
+# general-purpose PHP extension or ImageMagick snap, and other consumers are
+# not supported. The nextcloud admin opts in with:
 #
 #   snap connect nextcloud:imagick imagick:php-extensions
 #
@@ -19,10 +21,12 @@
 
 name: imagick
 adopt-info: imagick
-summary: PHP imagick extension + ImageMagick 7 as a content snap (e.g. for Nextcloud)
+summary: PHP imagick extension + ImageMagick 7 for the nextcloud snap only
 description: |
-  Imagick is a PHP extension to create and modify images using the
-  ImageMagick library.
+  Provides the PHP imagick extension to the nextcloud snap, and nothing
+  else. It is not a general-purpose PHP extension or ImageMagick snap: it
+  is built for exactly the PHP the nextcloud snap ships, has no apps or
+  commands, and does nothing on its own. Other uses are not supported.
 
   This snap is a content provider. It ships:
     - imagick.so, built against PHP 8.4.26 (PHP API 20240924, non-ZTS),

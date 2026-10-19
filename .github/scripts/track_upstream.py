@@ -10,13 +10,14 @@ Run by track-upstream.yml from the repository root. Upstream is:
 
 On a change, it rewrites snap/snapcraft.yaml and README.md in place
 (sources, checksums, version strings, the `craftctl set version=` line) and
-writes a PR title and body. Things that need a person - nextcloud changing
-its base, or nextcloud-snap's develop branch running ahead of master on PHP
-minor version or base - become issues instead (issues.json), because the
-build and the consumer have to move together there.
+writes a commit subject and body; the workflow commits that to main, which
+releases it. Things that need a person - a PHP minor (API) change, nextcloud
+changing its base, or nextcloud-snap's develop branch running ahead of master
+on either - become issues instead (issues.json), because this snap and
+nextcloud have to move together there.
 
 Outputs (in $GITHUB_OUTPUT): changed=true|false, title=..., and the files
-pr-body.md and issues.json. Standard library only.
+commit-body.txt and issues.json. Standard library only.
 """
 
 import hashlib
@@ -121,7 +122,7 @@ def main():
                 f"this snap is built on **{our_base}**. Its libraries won't load in a different base, "
                 "so the build has to move to the same base (build-packages, stage-packages, and the "
                 "ghostscript version all change with it). This needs a person; the daily tracker "
-                "won't open a pin-bump PR until the bases match again.\n\n"
+                "won't bump any pins until the bases match again.\n\n"
                 "_Opened automatically by `track-upstream.yml`._"
             ),
         })
@@ -151,6 +152,25 @@ def main():
         new["im"] = (im_tag, f"https://github.com/ImageMagick/ImageMagick/archive/refs/tags/{im_tag}.tar.gz", None)
         new["ext"] = (ext_tag, f"https://github.com/Imagick/imagick/archive/refs/tags/{ext_tag}.tar.gz", None)
 
+        # A PHP minor bump is a new PHP API. Committing it would release a
+        # build that only loads in the new PHP, before nextcloud's stable
+        # has it, so leave it to a person instead.
+        if minor(master["php"]) != minor(ours["php"].group("version")):
+            issues.append({
+                "title": f"nextcloud snap moving to PHP {minor(master['php'])}",
+                "body": (
+                    f"nextcloud-snap `master` now builds PHP **{master['php']}**; this snap is built against "
+                    f"PHP **{ours['php'].group('version')}**. That's a new PHP API, so this needs a person: the "
+                    "tracker won't bump PHP itself.\n\n"
+                    "Release the matching build when nextcloud's `latest/stable` ships that PHP, not before: "
+                    "a build for the new API doesn't load in the old PHP, so releasing early drops imagick for "
+                    "everyone still on it (and the smoke test fails until then anyway). Update the README's PHP "
+                    "API number at the same time. ImageMagick and imagick bumps keep going in automatically.\n\n"
+                    "_Opened automatically by `track-upstream.yml`._"
+                ),
+            })
+            del new["php"]
+
         names = {"php": "PHP", "im": "ImageMagick", "ext": "imagick"}
         for key, (version, url, sha) in new.items():
             old = ours[key]
@@ -178,32 +198,17 @@ def main():
     summary = ", ".join(f"{name} {old} → {new}" for _, name, old, new in changes)
     title = f"Track upstream: {summary}" if changes else ""
 
+    # Commit message body (the title is the subject line).
     body = []
     if changes:
-        body.append("Daily `track-upstream.yml` found new upstream versions:\n")
+        body.append("Bumped by the daily track-upstream.yml:\n")
         for key, name, old, new in changes:
-            body.append(f"- **{name}**: {old} → {new}")
+            body.append(f"- {name}: {old} -> {new}")
         body.append("")
-        body.append("Sources, checksums, docs and the snap version are updated. "
-                    "Snap Builds runs on this branch (build, review-tools, smoke test against "
-                    "nextcloud `latest/stable`); merging releases it to stable.")
-        php_change = next((c for c in changes if c[0] == "php"), None)
-        if php_change and minor(php_change[2]) != minor(php_change[3]):
-            body.append("")
-            body.append(
-                f"> [!WARNING]\n> PHP **minor** version change ({php_change[2]} → {php_change[3]}): that's a new "
-                "PHP API, so `imagick.so` moves to a new `no-debug-non-zts-<API>` dir and the README's API "
-                "number needs a manual update. Don't merge this (merging releases it) until nextcloud's `latest/stable` ships "
-                "the same PHP; until then the smoke test fails on purpose (API mismatch), and releasing "
-                "would drop imagick for everyone still on the old PHP."
-            )
-        if any(c[0] == "im" for c in changes):
-            body.append("")
-            body.append("ImageMagick is self-built, so its security fixes only reach users through bumps "
-                        "like this one; check its [changelog](https://github.com/ImageMagick/ImageMagick/releases) "
-                        "for CVEs and release promptly if there are any.")
-        body.append("\n---\n_Opened automatically by `track-upstream.yml`._")
-    open("pr-body.md", "w").write("\n".join(body) + "\n")
+        body.append("Sources, checksums, docs and the snap version are updated. Snap Builds\n"
+                    "builds and smoke-tests this against nextcloud latest/stable, and\n"
+                    "publish.yml releases it to stable if that passes.")
+    open("commit-body.txt", "w").write("\n".join(body) + "\n")
     json.dump(issues, open("issues.json", "w"), indent=2)
 
     out = os.environ.get("GITHUB_OUTPUT")
