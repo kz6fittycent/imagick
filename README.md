@@ -75,7 +75,7 @@ connected.)
 
 ## ABI
 
-`imagick.so` is built against **PHP 8.4.26** headers — PHP API
+`imagick.so` is built against **PHP 8.4.27** headers — PHP API
 **20240924**, **non-ZTS**. It uses the exact same PHP source tarball (and
 checksum) the nextcloud snap builds its PHP from. PHP on any other API
 will not load it; that's deliberate, since this snap is matched to the
@@ -83,7 +83,7 @@ nextcloud snap and nothing else.
 
 Versions in this build: **imagick 3.8.1**, **ImageMagick 7.1.2-34**
 (Q16-HDRI), **ghostscript 9.55.0** (from core22/jammy). The snap version
-spells out all three pins: `3.8.1+im7.1.2-34+php8.4.26`.
+spells out all three pins: `3.8.1+im7.1.2-34+php8.4.27`.
 
 The libraries are built on **core22**, so the nextcloud snap must be on
 core22 too. That means nextcloud **track 34 and later**: the `33`

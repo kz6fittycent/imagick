@@ -7,7 +7,7 @@
 #
 #   snap connect nextcloud:imagick imagick:php-extensions
 #
-# ABI note: the extension is built against PHP 8.4.26 headers (PHP API
+# ABI note: the extension is built against PHP 8.4.27 headers (PHP API
 # 20240924, non-ZTS) — byte-for-byte the same source tarball and checksum
 # the nextcloud snap builds its PHP from (both `master` and `develop`).
 # The PHP built here is a build-time tool only (phpize/php-config/headers)
@@ -29,7 +29,7 @@ description: |
   commands, and does nothing on its own. Other uses are not supported.
 
   This snap is a content provider. It ships:
-    - imagick.so, built against PHP 8.4.26 (PHP API 20240924, non-ZTS),
+    - imagick.so, built against PHP 8.4.27 (PHP API 20240924, non-ZTS),
       the exact PHP source the nextcloud snap uses;
     - a self-built, full-featured ImageMagick 7.1.2-34 (Q16HDRI) with
       librsvg (SVG), libheif (HEIC/HEIF), libtiff, libwebp, libjpeg,
@@ -65,13 +65,13 @@ slots:
       - $SNAP/extensions
 
 parts:
-  # PHP 8.4.26, built only to provide phpize/php-config/headers for the
+  # PHP 8.4.27, built only to provide phpize/php-config/headers for the
   # imagick part. Must stay the exact same tarball (and so the same PHP API
   # number) as the nextcloud snap's php part. Nothing is primed.
   php-dev:
     plugin: autotools
-    source: https://www.php.net/distributions/php-8.4.26.tar.bz2
-    source-checksum: sha256/4209694d7b0f63c45a3773e07cdc2bbfc71249265a5d951b1ff53e1147edc5ca
+    source: https://www.php.net/distributions/php-8.4.27.tar.bz2
+    source-checksum: sha256/b2530a877c722f4b08c9e174a30cb08bac2b7e1903ee6e9e315f0aa9f5f82c24
     source-type: tar
     autotools-configure-parameters:
       - --prefix=$CRAFT_PART_INSTALL
@@ -312,6 +312,6 @@ parts:
       # <imagick>+im<ImageMagick>+php<PHP it was built against>. Kept as a
       # literal: .github/scripts/track_upstream.py rewrites it on a bump,
       # and security-rebuild.yml looks for it to find the release commit.
-      craftctl set version="3.8.1+im7.1.2-34+php8.4.26"
+      craftctl set version="3.8.1+im7.1.2-34+php8.4.27"
     prime:
       - extensions/php
