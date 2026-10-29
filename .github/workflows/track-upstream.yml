@@ -5,7 +5,7 @@ name: 🔭 Track Upstream
 # owns ImageMagick's security updates, which the store's notice check
 # (security-rebuild.yml) can't see because ImageMagick is self-built.
 #
-# Once a day, .github/scripts/track_upstream.py compares our pins with:
+# Once a week (Mondays), .github/scripts/track_upstream.py compares our pins with:
 # - the PHP tarball and base on nextcloud-snap `master` (what feeds
 #   nextcloud's latest/stable);
 # - the latest ImageMagick and imagick releases.
@@ -23,7 +23,7 @@ name: 🔭 Track Upstream
 
 on:
   schedule:
-    - cron: "7 8 * * *"  # daily, 08:07 UTC
+    - cron: "7 8 * * 1"  # weekly (Mondays), 08:07 UTC
   workflow_dispatch:
 
 permissions:

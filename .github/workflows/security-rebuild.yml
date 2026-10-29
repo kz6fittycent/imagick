@@ -1,6 +1,6 @@
 name: 🛡️ Security Rebuild
 
-# Once a day, runs the Snap Store's own security check
+# Once a week (Mondays), runs the Snap Store's own security check
 # (review-tools.snap-check-notices - the same check behind the store's
 # "a rebuild would fix this" emails) against the snap published on stable.
 # That covers the Ubuntu packages bundled in it (librsvg, libheif, libtiff,
@@ -13,7 +13,7 @@ name: 🛡️ Security Rebuild
 # which may hold unreleased work - through snap-builds.yml (same review and
 # smoke test), and releases it straight to stable. It only releases when the
 # rebuild actually clears notices stable still has, so a fix that hasn't
-# reached the archive yet doesn't produce an identical release every day.
+# reached the archive yet doesn't produce an identical release every week.
 #
 # Run it by hand from the Actions tab (Run workflow):
 # - dry_run: checks and reports, but builds and releases nothing
@@ -22,7 +22,7 @@ name: 🛡️ Security Rebuild
 
 on:
   schedule:
-    - cron: "37 9 * * *"  # daily, 09:37 UTC
+    - cron: "37 9 * * 1"  # weekly (Mondays), 09:37 UTC
   workflow_dispatch:
     inputs:
       dry_run:
