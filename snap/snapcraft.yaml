@@ -31,7 +31,7 @@ description: |
   This snap is a content provider. It ships:
     - imagick.so, built against PHP 8.4.27 (PHP API 20240924, non-ZTS),
       the exact PHP source the nextcloud snap uses;
-    - a self-built, full-featured ImageMagick 7.1.2-34 (Q16HDRI) with
+    - a self-built, full-featured ImageMagick 7.1.2-35 (Q16HDRI) with
       librsvg (SVG), libheif (HEIC/HEIF), libtiff, libwebp, libjpeg,
       libpng, lcms2, freetype/fontconfig and ghostscript (PDF/PS/AI);
     - ImageMagick's stock policy.xml.
@@ -97,8 +97,8 @@ parts:
   # the autotools plugin.
   imagemagick:
     plugin: autotools
-    source: https://github.com/ImageMagick/ImageMagick/archive/refs/tags/7.1.2-34.tar.gz
-    source-checksum: sha256/f5163a573a1c1bff16358d0a592b2fb168ad0fd3b9dc5ff57dc7820eebc5cf79
+    source: https://github.com/ImageMagick/ImageMagick/archive/refs/tags/7.1.2-35.tar.gz
+    source-checksum: sha256/40b6fefa88fe16ca5a4b3d3db5133eaebfb0157f21f98530bde8aec5dd5b0776
     source-type: tar
     autotools-configure-parameters:
       - --prefix=/usr
@@ -312,6 +312,6 @@ parts:
       # <imagick>+im<ImageMagick>+php<PHP it was built against>. Kept as a
       # literal: .github/scripts/track_upstream.py rewrites it on a bump,
       # and security-rebuild.yml looks for it to find the release commit.
-      craftctl set version="3.8.1+im7.1.2-34+php8.4.27"
+      craftctl set version="3.8.1+im7.1.2-35+php8.4.27"
     prime:
       - extensions/php

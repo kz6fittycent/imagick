@@ -81,9 +81,9 @@ checksum) the nextcloud snap builds its PHP from. PHP on any other API
 will not load it; that's deliberate, since this snap is matched to the
 nextcloud snap and nothing else.
 
-Versions in this build: **imagick 3.8.1**, **ImageMagick 7.1.2-34**
+Versions in this build: **imagick 3.8.1**, **ImageMagick 7.1.2-35**
 (Q16-HDRI), **ghostscript 9.55.0** (from core22/jammy). The snap version
-spells out all three pins: `3.8.1+im7.1.2-34+php8.4.27`.
+spells out all three pins: `3.8.1+im7.1.2-35+php8.4.27`.
 
 The libraries are built on **core22**, so the nextcloud snap must be on
 core22 too. That means nextcloud **track 34 and later**: the `33`
