@@ -1,0 +1,53 @@
+name: 🤖 Dependabot Auto-Merge
+
+# Dependabot's patch and minor updates merge themselves once "🧪 Snap Builds"
+# has passed on the pull request. Major updates (which can change how an
+# action works) wait for a person.
+#
+# Why not GitHub's auto-merge: that needs a ruleset with required checks on
+# main, and on a personal account a ruleset can't let GitHub Actions bypass
+# it, which would block track-upstream.yml's commits to main.
+#
+# The merge is made with the Actions token, so it doesn't start the push
+# workflows on main: nothing is rebuilt or published to the store for it.
+
+on:
+  workflow_run:
+    workflows: ["🧪 Snap Builds"]
+    types: [completed]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  auto-merge:
+    if: >
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'pull_request' &&
+      github.event.workflow_run.actor.login == 'dependabot[bot]' &&
+      github.event.workflow_run.head_repository.full_name == github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - name: Merge it unless it's a major update
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BRANCH: ${{ github.event.workflow_run.head_branch }}
+          SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          pr="$(gh pr list --repo "$GITHUB_REPOSITORY" --head "$BRANCH" --state open \
+                  --json number,author,title --jq '.[] | select(.author.login == "app/dependabot")')"
+          if [[ -z "$pr" ]]; then
+            echo "No open Dependabot pull request for $BRANCH."
+            exit 0
+          fi
+          number="$(jq -r .number <<<"$pr")"
+          title="$(jq -r .title <<<"$pr")"
+          # "Bump actions/checkout from 6.0.1 to 6.1.0" (or "from v6 to v7").
+          if [[ "$title" =~ from\ v?([0-9]+)[^\ ]*\ to\ v?([0-9]+) ]] && \
+             [[ "${BASH_REMATCH[1]}" == "${BASH_REMATCH[2]}" ]]; then
+            # Only the commit that was built and tested gets merged.
+            gh pr merge "$number" --repo "$GITHUB_REPOSITORY" --squash --match-head-commit "$SHA"
+          else
+            echo "#$number looks like a major update (or an unusual title): leaving it for a person."
+          fi
